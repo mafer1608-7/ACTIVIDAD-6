@@ -1,84 +1,127 @@
-# Actividad 6 - Brazo robótico dibujando números
+# Actividad 6 — Comunicación entre dispositivos embebidos, visión y robótica
 
-Sistema de interacción entre un **ESP32, un teclado matricial 4x4, una pantalla LCD 16x2 mediante I2C y una simulación robótica en PyBullet**.
+Actividad dividida en dos partes que integran **ESP32 + MicroPython**, comunicación **USB/UART** y **SPI**, visualización en **LCD 16x2** y **OLED SSD1306**, y procesamiento con **Python**.
 
-El usuario introduce un número utilizando el teclado conectado al ESP32. El número aparece en la pantalla LCD y, al presionar `#`, es enviado al computador mediante comunicación USB.
+| Parte | Tema | Comunicación | Video |
+|---|---|---|---|
+| **Parte 1** | Teclado 4x4 + LCD → brazo robótico dibujando números en PyBullet | USB/UART (ESP32 ↔ PC) | [`ACTIVIDAD 6.mp4`](ACTIVIDAD%206.mp4) |
+| **Parte 2** | Dígito reconocido en el PC → ESP maestro → ESP esclavo → OLED | USB (PC → ESP-A) + **SPI** (ESP-A → ESP-B) | [`ACTIVIDAD 6.2.mp4`](ACTIVIDAD%206.2.mp4) |
 
-Python recibe la información, genera digitalmente el número mediante OpenCV, obtiene sus contornos y transforma dichos puntos en una trayectoria para que el brazo robótico, definido mediante un archivo URDF, reproduzca el número sobre una pizarra virtual en PyBullet.
+## Contenido
 
-## ¿Qué hace el proyecto?
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Dependencias](#dependencias)
+- [Parte 1 — Brazo robótico dibujando números](#parte-1--brazo-robótico-dibujando-números)
+- [Parte 2 — Maestro/esclavo SPI con pantalla OLED](#parte-2--maestroesclavo-spi-con-pantalla-oled)
+- [Solución de problemas](#solución-de-problemas)
+- [Autor](#autor)
 
-El sistema integra hardware, comunicación serial, procesamiento de imágenes y simulación robótica.
+---
 
-El funcionamiento puede resumirse de la siguiente manera:
+## Estructura del repositorio
+
+Los archivos del repositorio se encuentran en una sola carpeta. Los tres `main.py` están numerados porque cada uno se carga en una placa distinta:
+
+| Archivo en el repositorio | Se guarda como | Placa / destino | Parte |
+|---|---|---|---|
+| `main (1).py` | `main.py` | ESP32 (teclado + LCD) | 1 |
+| `lcd_i2c.py` | `lcd_i2c.py` | ESP32 (teclado + LCD) | 1 |
+| `prueba_teclado.py` | — (se ejecuta desde Thonny) | ESP32 | 1 |
+| `dibujar_brazo_teclado.py` | — | Computador | 1 |
+| `brazo (1).urdf` | `brazo (1).urdf` (misma carpeta que el script) | Computador | 1 |
+| `main (3).py` | `main.py` | **ESP-A** (maestro SPI) | 2 |
+| `main (2).py` | `main.py` | **ESP-B** (esclavo SPI + OLED) | 2 |
+| `ssd1306.py` | `ssd1306.py` | ESP-B | 2 |
+
+Organización recomendada:
+
+```text
+.
+├── README.md
+├── ACTIVIDAD 6.mp4
+├── ACTIVIDAD 6.2.mp4
+│
+├── Parte1/
+│   ├── ESP32/
+│   │   ├── main.py                  ← main (1).py
+│   │   └── lcd_i2c.py
+│   ├── prueba_teclado.py
+│   ├── dibujar_brazo_teclado.py
+│   └── brazo (1).urdf
+│
+└── Parte2/
+    ├── ESP-A_maestro/
+    │   └── main.py                  ← main (3).py
+    └── ESP-B_esclavo/
+        ├── main.py                  ← main (2).py
+        └── ssd1306.py
+```
+
+## Dependencias
+
+**En el computador:**
+
+```bash
+pip install pybullet pyserial opencv-python numpy
+```
+
+**En las placas:** MicroPython y el IDE Thonny para cargar los archivos.
+
+---
+
+# Parte 1 — Brazo robótico dibujando números
+
+El usuario escribe un número en un **teclado matricial 4x4** conectado a un ESP32. El número se muestra en un **LCD 16x2 I2C** y, al presionar `#`, se envía por USB al computador. Python genera el número con **OpenCV**, extrae su contorno, lo convierte en una trayectoria mediante **cinemática inversa** y un brazo definido en un **URDF** lo dibuja sobre una pizarra virtual en **PyBullet**.
+
+## Flujo del sistema
 
 ```text
 ┌──────────────────────┐
-│   Teclado matricial  │
+│  Teclado matricial   │
 │         4x4          │
 └──────────┬───────────┘
-           │
            ▼
 ┌──────────────────────┐
-│       ESP32          │
-│   MicroPython        │
+│       ESP32          │───────► LCD 16x2 I2C
+│    MicroPython       │
 └──────────┬───────────┘
-           │
-           ├──────────────► LCD 16x2 I2C
-           │
-           │ USB / UART
+           │  USB / UART   (NUM:2026)
            ▼
 ┌──────────────────────┐
-│        Python        │
-│       PySerial       │
+│  Python + PySerial   │
 └──────────┬───────────┘
-           │
            ▼
 ┌──────────────────────┐
-│       OpenCV         │
-│  Generación del      │
-│      número          │
+│ OpenCV: putText +    │
+│ findContours         │
 └──────────┬───────────┘
-           │
            ▼
 ┌──────────────────────┐
 │ Cinemática inversa   │
-│      del brazo       │
 └──────────┬───────────┘
-           │
            ▼
 ┌──────────────────────┐
-│       PyBullet       │
-│  Brazo robótico +    │
-│      pizarra         │
+│ PyBullet: brazo +    │──► Lienzo OpenCV ──► dibujo_<numero>.png
+│ pizarra              │
 └──────────────────────┘
+           │
+           └──► "LCD:estado" de vuelta al ESP32
 ```
 
 ## Secuencia de operación
 
-El proceso completo se desarrolla en varias etapas:
+1. El ESP32 inicia el teclado y el LCD.
+2. El usuario introduce un número de hasta cuatro cifras, que se ve en el LCD.
+3. `*` elimina la última cifra.
+4. Al presionar `#`, el ESP32 envía `NUM:<número>` por USB.
+5. Python recibe el mensaje y OpenCV genera el número y sus contornos.
+6. Los puntos del contorno se convierten en coordenadas 3D sobre la pizarra.
+7. La cinemática inversa calcula los movimientos de las articulaciones.
+8. PyBullet ejecuta la trayectoria: la punta de la pinza recorre la pizarra.
+9. El trazo se dibuja en PyBullet y en la ventana de OpenCV `Lienzo`.
+10. Al terminar se guarda `dibujo_<numero>.png` y Python envía el estado al LCD.
 
-1. El ESP32 inicia el teclado matricial y el LCD.
-2. El usuario introduce un número de hasta cuatro cifras.
-3. Cada cifra aparece en la pantalla LCD.
-4. La tecla `*` permite eliminar la última cifra.
-5. Al presionar `#`, el ESP32 transmite el número al computador.
-6. Python recibe el mensaje mediante el puerto serial.
-7. OpenCV genera una representación gráfica del número.
-8. Se obtienen los contornos de los caracteres.
-9. Los puntos del contorno se convierten en coordenadas físicas.
-10. La cinemática inversa determina los movimientos necesarios de las articulaciones.
-11. PyBullet ejecuta la trayectoria.
-12. La pinza del brazo recorre la superficie de la pizarra.
-13. El trazo se representa tanto en PyBullet como en una ventana de OpenCV.
-14. Al terminar, el dibujo se guarda como una imagen PNG.
-15. Python puede enviar nuevamente información al ESP32 para actualizar el LCD.
-
-## Teclado matricial
-
-Se utiliza un teclado matricial de cuatro filas por cuatro columnas.
-
-La distribución implementada en MicroPython es:
+## Teclado
 
 ```text
 ┌─────┬─────┬─────┬─────┐
@@ -92,606 +135,259 @@ La distribución implementada en MicroPython es:
 └─────┴─────┴─────┴─────┘
 ```
 
-Cada tecla tiene una función determinada:
+| Tecla | Función | Mensaje al PC |
+|---|---|---|
+| `0` a `9` | Agregar una cifra (máx. `MAX_CIFRAS = 4`) | — |
+| `*` | Eliminar la última cifra | — |
+| `#` | Enviar el número para dibujarlo | `NUM:123` |
+| `A` | Repetir el último dibujo | `CMD:A` |
+| `B` | Limpiar la pizarra | `CMD:B` |
+| `C` | Llevar el brazo a HOME | `CMD:C` |
+| `D` | Limpiar el número escrito en el LCD (solo local) | — |
 
-| Tecla | Función |
-|---|---|
-| `0` a `9` | Agregar una cifra |
-| `*` | Eliminar la última cifra |
-| `#` | Enviar el número para dibujarlo |
-| `A` | Repetir el último número |
-| `B` | Limpiar la pizarra |
-| `C` | Llevar el brazo a posición HOME |
-| `D` | Limpiar el número mostrado en el LCD |
-
-El programa permite introducir como máximo cuatro cifras. Esta restricción se encuentra definida mediante:
-
-```python
-MAX_CIFRAS = 4
-```
-
-La lógica de las teclas y sus funciones está implementada en `main.py`. :contentReference[oaicite:2]{index=2} :contentReference[oaicite:3]{index=3}
+El teclado se lee con antirrebote de 30 ms y cada pulsación hace parpadear el LED de la placa (GPIO 2).
 
 ## Conexiones del ESP32
 
-### LCD 16x2 mediante I2C
+**LCD 16x2 (I2C)**
 
 | LCD | ESP32 |
 |---|---|
 | SDA | GPIO 21 |
 | SCL | GPIO 22 |
-| VCC | 5 V / VIN |
+| VCC | 5 V (VIN) |
 | GND | GND |
 
-La comunicación I2C se configura a:
+El bus I2C trabaja a 100 kHz. El driver `lcd_i2c.py` prueba las direcciones habituales `0x27` y `0x3F`, o usa la que encuentre en el bus.
+
+**Teclado 4x4** (usa las resistencias `PULL_UP` internas, no requiere externas)
+
+| Filas | F1 | F2 | F3 | F4 |
+|---|---|---|---|---|
+| GPIO | 13 | 14 | 27 | 26 |
+
+| Columnas | C1 | C2 | C3 | C4 |
+|---|---|---|---|---|
+| GPIO | 25 | 33 | 32 | 23 |
+
+## Protocolo ESP32 ↔ computador
+
+| Dirección | Mensaje | Resultado |
+|---|---|---|
+| ESP32 → PC | `NUM:1234` | Dibujar el número |
+| ESP32 → PC | `CMD:A` | Repetir el último dibujo |
+| ESP32 → PC | `CMD:B` | Limpiar la pizarra |
+| ESP32 → PC | `CMD:C` | Llevar el brazo a HOME |
+| ESP32 → PC | `TECLA:x` | Diagnóstico (el PC lo ignora) |
+| PC → ESP32 | `LCD:texto` | Muestra el texto (máx. 16 caracteres) en la 2.ª línea del LCD |
+
+Velocidad: `115200` baudios. Cada mensaje termina en salto de línea.
+
+## Procesamiento del número (OpenCV)
+
+No se usan imágenes almacenadas: el número se genera dinámicamente.
+
+1. `cv2.putText()` escribe el número en una imagen.
+2. `cv2.findContours()` con `RETR_CCOMP` obtiene contornos externos **y huecos internos** (importante en `0, 4, 6, 8, 9`).
+3. `cv2.approxPolyDP()` suaviza los escalones y se remuestrea cada `PASO = 4 mm`.
+4. Los trazos se ordenan empezando por el más a la izquierda y luego por el más cercano.
+5. Se escalan para caber en `ANCHO_UTIL × ALTO_UTIL` (0.30 × 0.17 m) dentro de la pizarra.
+
+## Trayectoria y cinemática inversa
+
+`pizarra_a_mundo(u, v)` transforma coordenadas de la pizarra en un punto 3D:
+
+```text
+Imagen → Contorno → Coordenadas de pizarra (u, v) → (x, y, z) → Trayectoria
+```
+
+Parámetros de la pizarra:
 
 ```python
-I2C(
-    0,
-    sda=Pin(21),
-    scl=Pin(22),
-    freq=100000
-)
+X_PIZARRA = 0.48               # distancia del hombro a la pizarra
+PIZ_ANCHO, PIZ_ALTO = 0.40, 0.28
 ```
 
-El programa realiza un escaneo del bus I2C para detectar el dispositivo conectado. :contentReference[oaicite:4]{index=4}
-
-El controlador del LCD contempla las direcciones habituales:
-
-```text
-0x27
-0x3F
-```
-
-y también puede utilizar otra dirección detectada en el bus. :contentReference[oaicite:5]{index=5}
-
-### Teclado 4x4
-
-Las filas utilizan:
-
-| Fila | GPIO |
-|---|---|
-| F1 | GPIO 13 |
-| F2 | GPIO 14 |
-| F3 | GPIO 27 |
-| F4 | GPIO 26 |
-
-Las columnas utilizan:
-
-| Columna | GPIO |
-|---|---|
-| C1 | GPIO 25 |
-| C2 | GPIO 33 |
-| C3 | GPIO 32 |
-| C4 | GPIO 23 |
-
-El teclado utiliza las resistencias `PULL_UP` internas del ESP32. :contentReference[oaicite:6]{index=6}
-
-La configuración utilizada en el programa es:
-
-```python
-FILAS = [Pin(n, Pin.OUT, value=1)
-         for n in (13, 14, 27, 26)]
-
-COLUMNAS = [Pin(n, Pin.IN, Pin.PULL_UP)
-            for n in (25, 33, 32, 23)]
-```
-
-## Comunicación ESP32 - computador
-
-La información enviada desde el ESP32 utiliza la comunicación USB/UART proporcionada por MicroPython.
-
-Cuando el usuario presiona `#`, el programa genera un mensaje como:
-
-```text
-NUM:123
-```
-
-Este mensaje es interpretado por Python como una orden para dibujar el número.
-
-Las órdenes adicionales utilizan el siguiente formato:
-
-```text
-CMD:A
-CMD:B
-CMD:C
-```
-
-Por ejemplo:
-
-```text
-NUM:2026
-```
-
-indica que debe dibujarse el número `2026`.
-
-Mientras que:
-
-```text
-CMD:B
-```
-
-indica que la pizarra debe limpiarse.
-
-La comunicación desde Python hacia el ESP32 también permite enviar mensajes destinados al LCD utilizando:
-
-```text
-LCD:texto
-```
-
-El programa de MicroPython recibe estos mensajes y muestra el texto en la segunda línea de la pantalla. :contentReference[oaicite:7]{index=7}
-
-## Prueba individual del teclado y LCD
-
-Antes de ejecutar todo el sistema es posible utilizar:
-
-```text
-prueba_teclado.py
-```
-
-Este programa permite verificar independientemente el funcionamiento del teclado y del bus I2C.
-
-Al ejecutarlo en Thonny muestra:
-
-- Dispositivos encontrados en el bus I2C.
-- Estado de las columnas del teclado.
-- Fila correspondiente a cada tecla.
-- Columna correspondiente a cada tecla.
-- Tecla detectada.
-
-:contentReference[oaicite:8]{index=8}
-
-Para las columnas en reposo se espera:
-
-```text
-1 1 1 1
-```
-
-Si alguna permanece en `0` sin presionar una tecla, se debe revisar el cableado correspondiente. :contentReference[oaicite:9]{index=9}
-
-## Controlador del LCD
-
-El archivo:
-
-```text
-lcd_i2c.py
-```
-
-contiene el controlador para el LCD 16x2 basado en el controlador HD44780 y un módulo PCF8574.
-
-El programa trabaja con una comunicación I2C de cuatro bits y permite:
-
-- Inicializar el LCD.
-- Limpiar la pantalla.
-- Mover el cursor.
-- Escribir texto.
-- Escribir una línea completa.
-
-:contentReference[oaicite:10]{index=10}
-
-La función utilizada por el programa principal para mostrar información es:
-
-```python
-lcd.linea(fila, texto)
-```
-
-## Generación del número
-
-Una vez recibido el número en Python, no se utiliza una imagen previamente almacenada.
-
-El programa genera el carácter utilizando OpenCV:
-
-```python
-cv2.putText()
-```
-
-Posteriormente obtiene sus contornos mediante:
-
-```python
-cv2.findContours()
-```
-
-El modo utilizado permite obtener tanto contornos externos como huecos internos de los números.
-
-Esto es importante para caracteres como:
-
-```text
-0
-4
-6
-8
-9
-```
-
-ya que algunos contienen zonas internas que también deben formar parte de la representación.
-
-El proceso de generación de los trazos se encuentra implementado en:
-
-```text
-dibujar_brazo_teclado.py
-```
-
-:contentReference[oaicite:11]{index=11}
-
-## Transformación de imagen a trayectoria
-
-Los puntos obtenidos mediante OpenCV inicialmente se encuentran expresados en coordenadas de imagen.
-
-El programa realiza una transformación para convertirlos en posiciones sobre la pizarra virtual.
-
-La función:
-
-```python
-pizarra_a_mundo()
-```
-
-convierte las coordenadas de la pizarra en coordenadas tridimensionales:
-
-```text
-Imagen
-  ↓
-Contorno
-  ↓
-Coordenadas de pizarra
-  ↓
-Coordenadas X,Y,Z
-  ↓
-Trayectoria del brazo
-```
-
-La posición de la pizarra se define mediante parámetros geométricos como:
-
-```python
-X_PIZARRA = 0.48
-PIZ_ANCHO = 0.40
-PIZ_ALTO = 0.28
-```
-
-Estos valores corresponden a las dimensiones utilizadas dentro de la simulación. :contentReference[oaicite:12]{index=12}
-
-## Cinemática inversa
-
-El brazo utiliza una configuración de tres grados principales:
-
-```text
-joint_1
-joint_2
-joint_gripper
-```
-
-El programa calcula los valores necesarios para llevar la punta de la pinza hasta cada punto de la trayectoria.
-
-La función principal es:
-
-```python
-cinematica_inversa(punto)
-```
-
-Esta función recibe una posición:
-
-```text
-(x, y, z)
-```
-
-y obtiene:
-
-```text
-q1 → articulación de giro
-q2 → articulación del brazo
-d  → extensión de la pinza
-```
-
-La implementación utiliza:
+El brazo (`brazo (1).urdf`) es de tipo **R-R-P** (esférico):
+
+| Articulación | Tipo | Rango | Función |
+|---|---|---|---|
+| `joint_1` | Revoluta | ±2.5 rad | Giro de la base |
+| `joint_2` | Revoluta | ±2.0 rad | Inclinación del brazo |
+| `joint_gripper` | Prismática | 0 – 0.15 m | Extensión de la pinza |
+| `joint_dedo_izq` / `joint_dedo_der` | Prismáticas | — | Dedos (cerrados, hacen de “lápiz”) |
+
+La función `cinematica_inversa(punto)` recibe `(x, y, z)` y devuelve `q1`, `q2` y la extensión `d`:
 
 ```python
 q1 = math.atan2(v[1], v[0])
-
-q2 = math.atan2(
-    math.hypot(v[0], v[1]),
-    v[2]
-)
-
-d = r - L0
+q2 = math.atan2(math.hypot(v[0], v[1]), v[2])
+d  = r - L0
 ```
 
-Los resultados son limitados de acuerdo con los rangos definidos para las articulaciones. :contentReference[oaicite:13]{index=13}
+Los valores se limitan a los rangos de cada articulación y, si algún punto queda fuera de alcance, el programa lo avisa en consola.
 
-## Simulación en PyBullet
+Para **subir y bajar el lápiz**, la punta se aleja `LEVANTE = 3 cm` de la pizarra, desciende en 5 pasos y se levanta al terminar cada trazo. Al llegar y salir, la pinza se recoge (`d = 0`) para que la punta nunca roce la pizarra.
 
-El archivo URDF contiene el modelo utilizado para representar el brazo robótico.
+## Simulación y dibujo
 
-Python carga el modelo mediante:
+- PyBullet carga el URDF con `p.loadURDF(..., useFixedBase=True)` y controla las articulaciones por posición.
+- La posición real de la punta se obtiene con la cinemática directa de PyBullet (`punta()`).
+- Cuando la punta está a menos de 3 mm de la pizarra, y dentro de la zona blanca, se genera tinta con `p.addUserDebugLine()` y la misma línea se dibuja en la ventana OpenCV `Lienzo`.
+- Al terminar el dibujo se guarda `dibujo_<numero>.png`.
 
-```python
-p.loadURDF(
-    os.path.join(CARPETA, "brazo.urdf"),
-    [0, 0, BASE_Z],
-    useFixedBase=True
-)
-```
+Por defecto la pizarra se borra antes de cada número (`BORRAR_ANTES_DE_DIBUJAR = True`). Si se pone en `False`, los números se acumulan hasta pulsar `B`.
 
-El programa identifica automáticamente las articulaciones disponibles en el archivo URDF.
+## Ejecución
 
-Posteriormente utiliza control de posición para llevar cada articulación hacia el objetivo calculado. :contentReference[oaicite:14]{index=14}
+**1. Cargar en el ESP32** (con Thonny): `main (1).py` guardado como `main.py` y `lcd_i2c.py`.
 
-La pinza se utiliza como punto de referencia para determinar la posición real de la punta del brazo:
+**2. Verificar el hardware** (opcional): abrir `prueba_teclado.py` en Thonny y ejecutarlo con ▶. Muestra los dispositivos I2C encontrados (el LCD debe aparecer como `0x27` o `0x3f`), el estado de las columnas en reposo (deben ser `1 1 1 1`) y la fila, columna y tecla de cada pulsación.
 
-```python
-def punta():
-    ...
-```
-
-De esta manera el programa puede determinar cuándo la punta se encuentra sobre la superficie de la pizarra. :contentReference[oaicite:15]{index=15}
-
-## Dibujo sobre la pizarra
-
-La simulación incorpora una pizarra vertical ubicada frente al brazo.
-
-Cuando la punta entra en contacto con la zona de dibujo, el programa genera segmentos utilizando:
-
-```python
-p.addUserDebugLine()
-```
-
-Al mismo tiempo, el trazo se reproduce en una ventana de OpenCV denominada:
-
-```text
-Lienzo
-```
-
-Por tanto, el resultado puede observarse en dos representaciones:
-
-```text
-             Trayectoria
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-   PyBullet             OpenCV
-   Pizarra              Lienzo
-        │                 │
-        └────────┬────────┘
-                 ▼
-          dibujo_<numero>.png
-```
-
-El lienzo se guarda automáticamente al finalizar el dibujo. :contentReference[oaicite:16]{index=16}
-
-## Modos de ejecución
-
-El programa permite diferentes formas de iniciar la actividad.
-
-### Ejecución normal
-
-Conectar la ESP32 y ejecutar:
+**3. Cerrar Thonny** para liberar el puerto serial y ejecutar en el computador:
 
 ```bash
-python dibujar_brazo_teclado.py
+python dibujar_brazo_teclado.py                 # ESP32 en PUERTO_SERIE (COM3 por defecto)
+python dibujar_brazo_teclado.py --puerto COM5   # otro puerto
+python dibujar_brazo_teclado.py --demo          # sin ESP32, usando el teclado del PC
+python dibujar_brazo_teclado.py --numero 2026   # dibuja un número, guarda la imagen y termina
+python dibujar_brazo_teclado.py --sin-gui       # PyBullet en modo DIRECT (sin ventana)
 ```
 
-### Especificar el puerto
+En **modo demo** se escribe en la ventana `Lienzo`: dígitos, `Enter`/`#` para dibujar, `*`/Retroceso para borrar, `a` repetir, `b` borrar pizarra, `c` home, `q` salir. Si no se puede abrir el puerto serial, el programa entra en modo demo automáticamente.
 
-Si la ESP32 se encuentra en otro puerto:
-
-```bash
-python dibujar_brazo_teclado.py --puerto COM5
-```
-
-### Modo demostración
-
-El programa también dispone de un modo que permite trabajar sin la ESP32:
-
-```bash
-python dibujar_brazo_teclado.py --demo
-```
-
-En este caso se utiliza el teclado del computador para introducir los comandos.
-
-### Dibujar directamente un número
-
-También es posible indicar directamente el número:
-
-```bash
-python dibujar_brazo_teclado.py --numero 2026
-```
-
-El programa dibuja el número y finaliza después de completar la operación.
-
-Estas opciones están implementadas mediante argumentos de línea de comandos. :contentReference[oaicite:17]{index=17}
-
-## Puerto de comunicación
-
-El programa tiene configurado inicialmente:
-
-```python
-PUERTO_SERIE = "COM3"
-BAUDRATE = 115200
-```
-
-Si Windows asigna otro puerto al ESP32, puede indicarse desde la terminal:
-
-```bash
-python dibujar_brazo_teclado.py --puerto COM6
-```
-
-Antes de ejecutar Python se debe cerrar Thonny para liberar el puerto de comunicación.
-
-## Instalación de dependencias
-
-Las bibliotecas necesarias para el programa de Python son:
-
-```bash
-pip install pybullet pyserial opencv-python numpy
-```
-
-Las principales herramientas utilizadas son:
+## Ejemplo: dibujar `2026`
 
 ```text
-PyBullet
-PySerial
-OpenCV
-NumPy
-MicroPython
-Thonny
+Teclas:   2 → 0 → 2 → 6 → #
+
+LCD:      Numero: 2_ → Numero: 20_ → Numero: 202_ → Numero: 2026
+ESP32 →   NUM:2026
+Python →  contornos → trayectoria → cinemática inversa → PyBullet
+LCD:      Dibujando 2026 → Listo! 2026
+Archivo:  dibujo_2026.png
 ```
 
-## Archivos del proyecto
+---
 
-La estructura recomendada es:
+# Parte 2 — Maestro/esclavo SPI con pantalla OLED
+
+Un computador identifica un dígito (red neuronal **CNN** sobre la imagen de la cámara) y lo envía por USB a una primera placa (**ESP-A, maestro SPI**). Esta lo reenvía por **SPI** a una segunda placa (**ESP-B, esclavo SPI**), que verifica la trama, responde con un **ACK/NAK** y muestra el dígito en grande, con su porcentaje de confianza, en una **pantalla OLED SSD1306 128x64**.
+
+## Flujo del sistema
 
 ```text
-.
-├── README.md
-│
-├── ESP32/
-│   ├── main.py
-│   └── lcd_i2c.py
-│
-├── Python/
-│   ├── dibujar_brazo_teclado.py
-│   ├── prueba_teclado.py
-│   └── brazo.urdf
-│
-└── resultados/
-    └── dibujo_<numero>.png
+┌────────────────────┐   USB    ┌────────────────────┐   SPI    ┌────────────────────┐
+│    Computador      │  DIG:7,98│  ESP-A (maestro)   │ 5 bytes  │  ESP-B (esclavo)   │
+│  cámara + CNN      │ ───────► │  SoftSPI 2 kHz     │ ───────► │  esclavo por       │
+│                    │ ◄─────── │  reintentos x3     │ ◄─────── │  software          │
+└────────────────────┘ SPI:OK 7 └────────────────────┘ ACK/NAK  └─────────┬──────────┘
+                                                                           │ I2C
+                                                                           ▼
+                                                                  OLED SSD1306 128x64
 ```
 
-### `main.py`
+## Protocolo PC → ESP-A (USB)
 
-Programa principal de MicroPython.
+Líneas de texto terminadas en salto de línea, a 115200 baudios:
 
-Se encarga del teclado, LCD, lectura de comandos y comunicación con el computador. :contentReference[oaicite:18]{index=18}
-
-### `lcd_i2c.py`
-
-Controlador del LCD 16x2 mediante el expansor PCF8574. :contentReference[oaicite:19]{index=19}
-
-### `prueba_teclado.py`
-
-Programa de diagnóstico para verificar el teclado y la comunicación I2C. :contentReference[oaicite:20]{index=20}
-
-### `dibujar_brazo_teclado.py`
-
-Programa principal del computador. Integra PySerial, OpenCV, NumPy y PyBullet para convertir el número recibido en una trayectoria robótica. :contentReference[oaicite:21]{index=21}
-
-### `brazo.urdf`
-
-Modelo del brazo robótico utilizado por PyBullet.
-
-## Ejemplo de funcionamiento
-
-Supongamos que se desea dibujar:
-
-```text
-2026
-```
-
-El usuario realiza:
-
-```text
-2 → 0 → 2 → 6 → #
-```
-
-El LCD muestra progresivamente:
-
-```text
-Numero: 2
-Numero: 20
-Numero: 202
-Numero: 2026
-```
-
-Al presionar:
-
-```text
-#
-```
-
-la ESP32 envía:
-
-```text
-NUM:2026
-```
-
-Python recibe el comando y genera los contornos correspondientes.
-
-Posteriormente:
-
-```text
-2026
- ↓
-Contornos OpenCV
- ↓
-Puntos de trayectoria
- ↓
-Cinemática inversa
- ↓
-Movimientos de joint_1
-joint_2
-joint_gripper
- ↓
-Dibujo en PyBullet
-```
-
-Al terminar se genera:
-
-```text
-dibujo_2026.png
-```
-
-## Comandos disponibles
-
-| Comando | Resultado |
+| Mensaje | Significado |
 |---|---|
-| `NUM:1234` | Dibujar el número recibido |
-| `CMD:A` | Repetir el último dibujo |
-| `CMD:B` | Limpiar la pizarra |
-| `CMD:C` | Llevar el brazo a HOME |
-| `LCD:texto` | Mostrar texto en el LCD |
+| `DIG:7,98` | Dígito `7` con una confianza del 98 % (se limita a 100) |
+| `DIG:-` | No hay ningún dígito frente a la cámara |
 
-La lógica correspondiente a las órdenes `A`, `B` y `C` se encuentra en el procesamiento principal de Python. :contentReference[oaicite:22]{index=22}
+Respuestas de la ESP-A hacia el PC:
 
-## Consideraciones
+| Respuesta | Significado |
+|---|---|
+| `SPI:OK 7` | El esclavo confirmó la trama con ACK |
+| `SPI:ERROR 7` | Sin ACK tras 3 intentos |
+| `SPI:DATO INVALIDO …` | El mensaje recibido era incorrecto (dígito fuera de 0–9, formato erróneo) |
 
-- El archivo `brazo.urdf` debe estar disponible para PyBullet.
-- El puerto serial no debe estar siendo utilizado simultáneamente por Thonny y Python.
-- El LCD requiere alimentación, GND y las líneas SDA/SCL correctamente conectadas.
-- El teclado necesita las ocho líneas correspondientes a sus cuatro filas y cuatro columnas.
-- La posición y dimensiones de la pizarra forman parte de la geometría de la simulación.
-- El brazo debe tener las articulaciones esperadas por el programa.
-- Los números se generan dinámicamente mediante OpenCV, no mediante imágenes previamente almacenadas.
+## Trama SPI (5 bytes)
 
-## Resultado esperado
+| Byte | Contenido | Valor |
+|---|---|---|
+| 0 | Inicio | `0xA5` |
+| 1 | Dígito | `0`–`9`, o `0xFF` si no hay dígito |
+| 2 | Confianza | `0`–`100` (%) |
+| 3 | Checksum | `0xA5 ^ dígito ^ confianza` (XOR) |
+| 4 | Relleno / **respuesta** | El maestro envía `0x00`; el esclavo contesta por MISO `0x06` (**ACK**) o `0x15` (**NAK**) |
 
-Al finalizar la actividad se obtiene un sistema en el que una entrada realizada físicamente mediante el teclado matricial controla una simulación robótica.
+El esclavo calcula el checksum al recibir los primeros cuatro bytes y devuelve el resultado durante el quinto, por lo que el maestro conoce el resultado de la misma transacción (full-duplex).
 
-El resultado final integra:
+## Maestro — ESP-A (`main (3).py`)
 
-```text
-Entrada física
-     ↓
-Teclado 4x4
-     ↓
-ESP32 + MicroPython
-     ↓
-LCD
-     ↓
-Comunicación USB
-     ↓
-Python
-     ↓
-OpenCV
-     ↓
-Cinemática inversa
-     ↓
-PyBullet
-     ↓
-Brazo robótico
-     ↓
-Dibujo del número
-```
+- Usa **`SoftSPI`** a **2 kHz**, modo 0 (`polarity=0, phase=0`).
+- Lee sin bloquear las líneas `DIG:` del USB.
+- Baja `CS`, espera 3 ms, envía la trama con `write_readinto()` y libera `CS`.
+- Si no recibe `ACK`, **reintenta hasta 3 veces** con 80 ms de espera entre intentos.
+- Enciende un LED (GPIO 4) mientras envía.
 
-El proyecto demuestra la integración entre dispositivos embebidos, comunicación serial, procesamiento de imágenes y simulación de robots.
+## Esclavo — ESP-B (`main (2).py`)
+
+MicroPython no incluye modo esclavo SPI por hardware, por lo que el protocolo se implementa **leyendo directamente las líneas del bus** (modo 0). Por esa razón el reloj del maestro es tan lento:
+
+1. Un flanco de bajada en `CS` indica el inicio de una trama.
+2. En cada **flanco de subida de SCK** se lee un bit de MOSI (MSB primero).
+3. Antes de cada flanco de subida se coloca en MISO el bit correspondiente de la respuesta.
+4. Si `CS` sube antes de completar los 5 bytes, la trama se descarta.
+5. Al terminar se valida el byte de inicio y el checksum y se actualiza la pantalla.
+
+**Pantalla OLED**
+
+| Situación | Se muestra |
+|---|---|
+| Al iniciar | “Esperando al maestro…” |
+| Trama válida con dígito | Dígito grande (fuente propia 5x7 ampliada ×6), etiqueta `CNN`, confianza en tamaño ×2 y contador `#n` de tramas |
+| Trama válida sin dígito (`0xFF`) | “Sin dígito frente a la cámara” |
+| Trama con error | No se actualiza la pantalla; la consola muestra los bytes recibidos |
+
+## Conexiones
+
+Pines de una placa **ESP32-S3**:
+
+**Bus SPI entre las placas** (conexión directa, mismo nombre en ambos lados)
+
+| Señal | ESP-A (maestro) | ESP-B (esclavo) |
+|---|---|---|
+| CS | GPIO 10 | GPIO 10 |
+| SCK | GPIO 12 | GPIO 12 |
+| MOSI | GPIO 11 | GPIO 11 |
+| MISO | GPIO 13 | GPIO 13 |
+| GND | GND | GND *(común, obligatorio)* |
+
+**OLED SSD1306 (I2C)** — solo en la ESP-B
+
+| OLED | ESP-B |
+|---|---|
+| SDA | GPIO 8 |
+| SCL | GPIO 9 |
+| VCC | 3V3 |
+| GND | GND |
+
+## Ejecución
+
+1. **ESP-B:** guardar `main (2).py` como `main.py` y `ssd1306.py`. Al arrancar muestra “Esperando al maestro…”.
+2. **ESP-A:** guardar `main (3).py` como `main.py`. La consola indica `ESP-A lista: maestro SPI`.
+3. Conectar el bus SPI y GND según la tabla.
+4. Desde el computador, enviar los mensajes `DIG:` por el puerto serial de la ESP-A. Para una prueba rápida sin cámara se puede escribir directamente `DIG:5,97` en la consola de Thonny conectada a la ESP-A.
+5. Verificar que la OLED de la ESP-B muestre el dígito y la confianza, y que la ESP-A responda `SPI:OK 5`.
+
+---
+
+## Solución de problemas
+
+| Problema | Posible causa / solución |
+|---|---|
+| Python no puede abrir el puerto | Thonny aún lo tiene abierto: cerrarlo. Indicar el puerto con `--puerto COMx` |
+| El LCD no muestra nada | Revisar VCC (5 V), GND, SDA=21 y SCL=22. Ejecutar `prueba_teclado.py` para ver si el bus I2C detecta `0x27`/`0x3f`. El programa sigue funcionando sin LCD |
+| Columnas del teclado en `0` en reposo | Corto o pin equivocado en esa columna |
+| El brazo no dibuja o falla al cargar | Verificar que el archivo URDF del brazo esté junto al script |
+| “Puntos fuera del alcance” | Reducir `ANCHO_UTIL`/`ALTO_UTIL` o acercar `X_PIZARRA` |
+| `SPI:ERROR` en la ESP-A | Revisar cableado SPI, GND común y que la ESP-B esté en marcha. Conviene encender primero la ESP-B |
+| La OLED no se actualiza | Revisar SDA/SCL (GPIO 8/9) y la dirección I2C `0x3C` |
 
 ## Autor
 
-Desarrollado por <Mafe Peñuela> — [@mafer1608-7](https://github.com/mafer1608-7)
+Desarrollado por **Mafe Peñuela** — [@mafer1608-7](https://github.com/mafer1608-7)
